@@ -1,64 +1,44 @@
-import os, time, sys, signal
+import os, time, signal
 import logging
 import subprocess, threading
-import threading
+import threading, shlex
 from queue import Queue, Empty
 
-class OutputCollector(threading.Thread):
+import asyncio
+import sys
+from asyncio.subprocess import PIPE, STDOUT
 
-    stdout_q = Queue()
-    stdout = None
+stop = False
 
-    def __init__(self, stdout):
-        super().__init__()
-        self.stdout = stdout
+async def run_command(cmd, timeout=None):
+    # start child process
+    # NOTE: universal_newlines parameter is not supported
+    process = await asyncio.create_subprocess_shell(
+        cmd='source /Users/mephisto/projects/staycool-backend/.venv/bin/activate && flask run --port 5050',   # Python doc recommends str arg if shell=True
+        #shell=True,
+        env={'FLASK_APP': 'sc_backend_app.py'},
+        cwd='/Users/mephisto/projects/staycool-backend',
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
 
-    def run(self):
-        while True:
-            if (line := self.stdout.readline()) != '':
-                self.stdout_q.put(line)
-                print(line)
-            else:
+    # read line (sequence of bytes ending with b'\n') asynchronously
+    while True:
+        try:
+            line = await asyncio.wait_for(process.stdout.readline(), timeout)
+        except asyncio.TimeoutError:
+            pass
+        else:
+            if not line: # EOF
                 break
-
-class Test(threading.Thread):
-
-    _stop = False
-    proc = None
-
-    def stop(self):
-        print('Stopping')
-        self._stop = True
-
-    def run(self):
-
-        _stop = False
-
-        self.proc = subprocess.Popen(
-            #args='python3 testproc.py',
-            args='source /Users/mephisto/projects/staycool-backend/.venv/bin/activate && flask run --port 5050',   # Python doc recommends str arg if shell=True
-            shell=True,
-            env={'FLASK_APP': 'sc_backend_app.py'},
-            cwd='/Users/mephisto/projects/staycool-backend',
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True               # stdout as text not as byte stream
-        )
-
-        sto = OutputCollector(self.proc.stdout)
-        sto.start()
-
-        while (res := self.proc.poll()) is None:
-            #try: print(sto.stdout_q.get_nowait())
-            #except Empty: pass 
-            if (line := self.proc.stdout.readline()) is not None:
+            else:
                 print(line)
 
-        print('Finished process with %s' % res)
-        
-t = Test()
-t.start()
-print('Starting')
-time.sleep(3)
-t.proc.terminate()
-#t.stop()
+    return await process.wait() # wait for the child process to exit
+
+
+loop = asyncio.get_event_loop()
+returncode = loop.run_until_complete(run_command(shlex.split('source /Users/mephisto/projects/staycool-backend/.venv/bin/activate && flask run --port 5050'),
+                                                 timeout=1))
+loop.close()
+
