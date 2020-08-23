@@ -1,0 +1,19 @@
+servers:
+  Staycool Backend:
+    type: flask
+    env:
+      FLASK_APP: sc_backend_app.py
+    venv: $dir/.venv
+    dir: /Users/mephisto/projects/staycool-backend
+
+  Staycool Scanner:
+    type: flask
+    env:
+      FLASK_APP: server.py
+    venv: $dir/.venv
+    dir: /Users/mephisto/projects/staycool-scanner
+    port: 5050
+
+  Staycool Frontend:
+    type: npm
+    dir: /Users/mephisto/projects/staycool
