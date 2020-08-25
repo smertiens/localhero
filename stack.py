@@ -1,11 +1,12 @@
 import yaml
-import os
+import os, time
 import logging
-import subprocess, threading
+import subprocess, threading, psutil, signal
 from plugins import flask, npm
 
+
 def process_variables(s: str, vars: dict) -> str:
-    # TODO: proper regex
+    # TODO: proper regex?
     for k, v in vars.items():
         s = s.replace('$'+k, v)
     
@@ -69,42 +70,34 @@ class ServerRunner(threading.Thread):
     conf = None
     env = None
     cmd = ''
-    _on_output_updated = None
-    running = False
-    intent_to_stop = False
-    output = ''
+    output = []
+    process_id = None
+    name = ''
+    logger = None
 
-    def __init__(self, conf: ServerConfig, env: ServerRunnerEnvironment):
+    def __init__(self, conf: ServerConfig, env: ServerRunnerEnvironment, name = 'Unnamed'):
         super().__init__()
 
         self.conf = conf
         self.env = env
-        self.intent_to_stop = False
-        self.running = False
+        self.name = name
 
-        # setup logging
-        self.get_logger().addHandler(logging.StreamHandler())
-        self.get_logger().setLevel(logging.DEBUG)
-
-    def on_output_updated(self, cb: callable):
-        self._on_output_updated = cb
-
-    def get_logger(self) -> logging.Logger:
-        return logging.getLogger(self.__module__)
-
-    def stop(self):
-        self.intent_to_stop = True
+        # Setup logging
+        self.logger = logging.getLogger(name)
+        self.logger.setLevel(logging.DEBUG)
+        hdl = logging.StreamHandler()
+        hdl.setFormatter(logging.Formatter(fmt='%(levelname)s:%(name)s:%(message)s'))
+        self.logger.addHandler(logging.StreamHandler())
 
     def run(self):
 
         cmd = ''
         found_plugin = False
-        self.intent_to_stop = False
 
         # find plugin to handle the config
         for plugin in self.env.plugins:
             if self.conf.get('type', '') in plugin.handles:
-                self.get_logger().info('Using "%s" for type "%s"' % (plugin.__class__.__name__, self.conf.get('type')))
+                self.logger.info('Using "%s" for type "%s"' % (plugin, self.conf.get('type')))
                 plugin_inst = plugin(self.conf)
                 cmd = plugin_inst.get_command()
 
@@ -123,7 +116,7 @@ class ServerRunner(threading.Thread):
             cmd = 'source %s && %s' % (venv_dir, cmd)
 
         
-        logging.getLogger(self.__module__).debug('Running command "%s"' % cmd)
+        self.logger.debug('Running command "%s"' % cmd)
        
         proc = subprocess.Popen(
             args=cmd,               # Python doc recommends str arg if shell=True
@@ -135,52 +128,34 @@ class ServerRunner(threading.Thread):
             text=True               # stdout as text not as byte stream
         )
 
+        self.process_id = proc.pid
+
         while (res := proc.poll()) is None:
-            if self.intent_to_stop:
-                self.get_logger().info('Sending SIGTERM...')
-                proc.terminate()
-                self.intent_to_stop = False
+            if (line := proc.stdout.readline()) != '':
+                self.output.append(line)
 
-            if (line := proc.stdout.readline()) is not None:
-                self.output += line + '\n'
-
-        self.running = False
-        self.get_logger().info('Server process stopped.')
-
-'''
-class ServerStack:
-
-    conf = None
-    plugins = []
-
-    def __init__(self):
-        self.conf = Config()
-        self.conf.load_yaml(Config.get_config_file())
-
-        self.plugins = [flask.FlaskPlugin]
-
-        # setup logging
-        self.get_logger().addHandler(logging.StreamHandler())
-        self.get_logger().setLevel(logging.DEBUG)
+        self.logger.info('Server process stopped.')
 
 
-    def get_logger(self) -> logging.Logger:
-        return logging.getLogger(self.__module__)
-    
-    def run_server(self, name: str, server_conf: ServerConfig, cb = None):
+# we need a separate function to shutdown the process, since the thread will block on stdout.readline()
+def stop_runner(runner: ServerRunner):
 
-        # find plugin to handle the config
-        for plugin in self.plugins:
-            if server_conf.get('type', '') in plugin.handles:
-                self.get_logger().info('Using "%s" for type "%s"' % (plugin.__class__.__name__, server_conf.get('type')))
-                plugin_inst = plugin(server_conf)
-                cmd = plugin_inst.get_command()
+    if not runner.is_alive(): return
 
-                proc = ServerProcess(server_conf, cmd)
-                proc.on_output_updated = cb
-                plugin_inst.before_run()
-                proc.start()
+    try:
+        runner.logger.info('Shutting down process...')
 
-                # stop looking for plugin
-                break
-'''
+        parent = psutil.Process(runner.process_id)
+        children = parent.children(recursive=True)
+
+        for child in children:
+            child.send_signal(signal.SIGINT)
+
+        gone, alive = psutil.wait_procs(children, timeout=3)
+
+        for still_alive in alive:
+            runner.logger.warning('Process %s is still alive, sending KILL signal...' % still_alive)
+            sill_alive.kill()
+
+    except psutil.NoSuchProcess:
+        runner.logger.error('Could not determine server runner process.')

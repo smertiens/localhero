@@ -1,37 +1,48 @@
-import sys
-import random
-from stack import Config, ServerConfig, ServerRunner, ServerRunnerEnvironment
+import sys, logging
+from stack import Config, ServerConfig, ServerRunner, ServerRunnerEnvironment, stop_runner
 
 from PySide2.QtWidgets import (QApplication, QLabel, QPushButton, QTextEdit, QStackedWidget, QSpacerItem,
                                QVBoxLayout, QWidget, QMainWindow, QHBoxLayout, QSizePolicy)
-from PySide2.QtCore import Slot, Qt, Signal, QTimer
+from PySide2.QtCore import Slot, Qt, Signal, QTimer, SIGNAL
+from PySide2.QtGui import QFont
 
 from plugins import flask, npm
 
 server_env = ServerRunnerEnvironment()
 
+class ClickableLabel(QLabel):
+    
+    clicked = Signal()
+
+    def mouseReleaseEvent(self, ev):
+        self.clicked.emit()
+
+
 class ServerControlWidget(QWidget):
     
-    clicked = Signal(object)
     index = 0
     conf = None
     runner_inst = None
     timer = None
+    last_pulled_output_index = 0
+    clicked = Signal()
 
     def __init__(self, name: str, conf: ServerConfig):
-        QWidget.__init__(self)
+        super(ServerControlWidget, self).__init__()
 
         self.conf = conf
-        #self.setStyleSheet('background: white;')
 
         self.layout = QHBoxLayout()
-        self.label = QLabel(name)
-        self.btn_start = QPushButton('Start')
+        self.label = ClickableLabel(name)
+        self.label.clicked.connect(lambda: self.clicked.emit())
+
+        self.btn_start = QPushButton('>')
+        self.btn_start.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Preferred)
         self.btn_start.setEnabled(True)
-        self.btn_stop = QPushButton('Stop')
+        self.btn_stop = QPushButton('[ ]')
         self.btn_stop.setEnabled(False)
 
-        self.btn_start.clicked.connect(self.run_server)
+        self.btn_start.clicked.connect(lambda: self.run_server(name))
         self.btn_stop.clicked.connect(self.stop_server)
 
         self.layout.addWidget(self.label)
@@ -40,9 +51,12 @@ class ServerControlWidget(QWidget):
         self.layout.addWidget(QLabel('*'))
 
         self.textOutput = QTextEdit(name)
+        self.textOutput.setStyleSheet('color: white; background: black; font-family: %s; font-size:11px' % ('Courier New, Monospace'))
+        self.textOutput.setReadOnly(True)
+        self.textOutput.setLineWrapMode(QTextEdit.NoWrap)
+        self.textOutput.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
         self.setLayout(self.layout)
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
 
         self.timer = QTimer()
         self.timer.setInterval(1000)
@@ -50,26 +64,27 @@ class ServerControlWidget(QWidget):
 
     @Slot()
     def check_proc_state(self):
-        if self.runner_inst.isAlive():
+        if self.runner_inst.is_alive():
             self.btn_start.setEnabled(False)
             self.btn_stop.setEnabled(True)
 
-            self.textOutput.setPlainText(self.runner_inst.output)
+            new_lines = self.runner_inst.output[self.last_pulled_output_index:]
+            self.last_pulled_output_index += len(new_lines)
+            new_output = ''.join(new_lines)
+            self.textOutput.setPlainText(self.textOutput.toPlainText() + new_output)
         else:
             self.btn_start.setEnabled(True)
             self.btn_stop.setEnabled(False)
             self.timer.stop()
 
-    @Slot()
-    def run_server(self):
-        self.runner_inst = ServerRunner(self.conf, server_env)
-        #self.runner_inst.on_output_updated(lambda t: self.textOutput.setPlainText(self.textOutput.toPlainText() + t))
+    def run_server(self, name):
+        self.runner_inst = ServerRunner(self.conf, server_env, name)
         self.runner_inst.start()
         self.timer.start()
 
     @Slot()
     def stop_server(self):
-        self.runner_inst.stop()
+        stop_runner(self.runner_inst)
 
     def emit_clicked(self):
         self.clicked.emit(self)
@@ -84,14 +99,10 @@ class MainWindow(QWidget):
         for tab in self.server_tabs:
             tab.textOutput.hide()
 
-    @Slot()
-    def tab_clicked(self, tab: ServerControlWidget):
-        self._hide_all_outputs()
-        tab.textOutput.show()
-
     def add_server_tab(self, name:str, conf: ServerConfig):
         tab = ServerControlWidget(name, conf)
-        tab.clicked.connect(self.tab_clicked)
+        index = self.out_stacked.count()
+        tab.clicked.connect(lambda: self.out_stacked.setCurrentIndex(index))
         self.out_stacked.addWidget(tab.textOutput)
         self.tab_layout.addWidget(tab)
         self.server_tabs.append(tab)
@@ -116,10 +127,20 @@ class MainWindow(QWidget):
 
         for name, server_conf in self.conf.get_servers().items():
             tab = self.add_server_tab(name, server_conf)
+
+        self.tab_layout.addSpacerItem(QSpacerItem(20, 20, QSizePolicy.Minimum, QSizePolicy.Expanding))
         
         self.setLayout(self.layout)
 
+    def closeEvent(self, event):
+        # stop all running processes before exiting
+        for tab in self.server_tabs:
+            tab.stop_server()
+
 if __name__ == "__main__":
+    # setup logging
+    logging.basicConfig(level=logging.DEBUG)
+    
     app = QApplication(sys.argv)
 
     widget = MainWindow()
