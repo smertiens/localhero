@@ -1,0 +1,33 @@
+#main-window {
+    background: #313131;
+}
+
+QTextEdit {
+    background: #484848;
+    color: #E2E2E2;
+    font-family: 'Courier New', Monospace;
+}
+
+ServerControlWidget {
+    background: #393939;
+}
+
+ServerControlWidget[selected=true] {
+    background: #484848;
+}
+
+ServerControlWidget[selected=true] > QLabel {
+    color: #CBCBCB;
+}
+
+ServerControlWidget > QLabel {
+    color: #7C7C7C;
+}
+
+ServerControlWidget QLabel[class=indicator_off] {
+    color: #A33B3B;
+}
+
+ServerControlWidget QLabel[class=indicator_on] {
+    color: #71B242;
+}
