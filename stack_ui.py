@@ -5,6 +5,7 @@ from stack import Config, ServerConfig, ServerRunner, ServerRunnerEnvironment, s
 from PySide2.QtWidgets import (QApplication, QLabel, QPushButton, QTextEdit, QStackedWidget, QSpacerItem,
                                QVBoxLayout, QWidget, QMainWindow, QHBoxLayout, QSizePolicy)
 from PySide2.QtCore import Slot, Qt, Signal, QTimer, SIGNAL, QMargins
+from PySide2.QtGui import QTextCursor
 
 from plugins import flask, npm
 import qt_fa
@@ -43,7 +44,7 @@ class ServerControlWidget(QWidget):
 
         self.btn_start = QPushButton(qt_fa.FA_PLAY)
         self.btn_start.setFlat(True)
-        self.btn_start.setFont(qt_fa.get_font(24))
+        self.btn_start.setFont(qt_fa.get_font(20))
 
         self.btn_start.setSizePolicy(
             QSizePolicy.Minimum, QSizePolicy.Preferred)
@@ -51,7 +52,7 @@ class ServerControlWidget(QWidget):
 
         self.btn_stop = QPushButton(qt_fa.FA_STOP)
         self.btn_stop.setFlat(True)
-        self.btn_stop.setFont(qt_fa.get_font(24))
+        self.btn_stop.setFont(qt_fa.get_font(20))
         self.btn_stop.setEnabled(False)
 
         self.btn_start.clicked.connect(lambda: self.run_server(name))
@@ -94,11 +95,27 @@ class ServerControlWidget(QWidget):
             self.status_indic.setProperty('class', 'indicator_on')
             self.status_indic.setStyle(self.status_indic.style())
 
+            # update process outputs
+            # maintain scroll position and selection
+            scroll_y = self.textOutput.verticalScrollBar().value()
+            scroll_x = self.textOutput.horizontalScrollBar().value()
+            sel_start = self.textOutput.textCursor().selectionStart()
+            sel_end = self.textOutput.textCursor().selectionEnd()
+
             new_lines = self.runner_inst.output[self.last_pulled_output_index:]
             self.last_pulled_output_index += len(new_lines)
             new_output = ''.join(new_lines)
             self.textOutput.setPlainText(
                 self.textOutput.toPlainText() + new_output)
+
+            cur = self.textOutput.textCursor()
+            cur.setPosition(sel_start)
+            cur.setPosition(sel_end, QTextCursor.KeepAnchor)
+            self.textOutput.setTextCursor(cur)
+
+            self.textOutput.verticalScrollBar().setValue(scroll_y)
+            self.textOutput.horizontalScrollBar().setValue(scroll_x)
+
         else:
             self.btn_start.setEnabled(True)
             self.btn_stop.setEnabled(False)
@@ -158,13 +175,16 @@ class MainWindow(QWidget):
         QWidget.__init__(self)
 
         # window setup
-        self.setWindowTitle('Local Server Stack')
+        self.setWindowTitle(QApplication.applicationName())
         self.layout = QHBoxLayout()
 
         self.tab_layout = QVBoxLayout()
         self.out_stacked = QStackedWidget()
         self.layout.addLayout(self.tab_layout)
         self.layout.addWidget(self.out_stacked)
+        self.layout.setStretchFactor(self.out_stacked, 2)
+        self.layout.setSpacing(0)
+        self.setLayout(self.layout)
 
         # load settings
         self.conf = Config()
@@ -177,9 +197,10 @@ class MainWindow(QWidget):
 
         self.tab_layout.addSpacerItem(QSpacerItem(
             20, 20, QSizePolicy.Minimum, QSizePolicy.Expanding))
-
-        self.layout.setSpacing(0)
-        self.setLayout(self.layout)
+        
+        self.info_label = QLabel(QApplication.applicationName() + ' ' + QApplication.applicationVersion())
+        self.info_label.setObjectName('info-label')
+        self.tab_layout.addWidget(self.info_label)
 
     def closeEvent(self, event):
         # stop all running processes before exiting
@@ -192,6 +213,9 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.DEBUG)
 
     app = QApplication(sys.argv)
+    app.setApplicationName('StackMan')
+    app.setApplicationVersion('0.1.0')
+
     with open('./style/app.css', 'r') as f:
         app.setStyleSheet(f.read())
 

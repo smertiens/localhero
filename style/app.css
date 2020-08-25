@@ -22,6 +22,7 @@ ServerControlWidget[selected=true] > QLabel {
 
 ServerControlWidget > QLabel {
     color: #7C7C7C;
+    font-size: 16px;
 }
 
 ServerControlWidget QLabel[class=indicator_off] {
@@ -30,4 +31,8 @@ ServerControlWidget QLabel[class=indicator_off] {
 
 ServerControlWidget QLabel[class=indicator_on] {
     color: #71B242;
+}
+
+#info-label {
+    color: #CBCBCB;
 }
