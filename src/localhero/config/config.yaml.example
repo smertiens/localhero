@@ -1,0 +1,15 @@
+servers:
+
+# Example: flask app
+#
+#  My Flask App:
+#    type: flask
+#    env:
+#      FLASK_APP: server.py
+#    venv: $dir/.venv
+#    dir: /projects/flask_app
+
+# Example: vue cli app
+#  Vue App:
+#    type: vue-cli
+#    dir: /projects/my_vue_app

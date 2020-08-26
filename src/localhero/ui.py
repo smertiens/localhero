@@ -1,14 +1,15 @@
-import sys
+import sys, os
 import logging
-from stack import Config, ServerConfig, ServerRunner, ServerRunnerEnvironment, stop_runner
+from localhero.core import Config, ServerConfig, ServerRunner, ServerRunnerEnvironment, stop_runner, MissingConfig
 
 from PySide2.QtWidgets import (QApplication, QLabel, QPushButton, QTextEdit, QStackedWidget, QSpacerItem,
                                QVBoxLayout, QWidget, QMainWindow, QHBoxLayout, QSizePolicy)
 from PySide2.QtCore import Slot, Qt, Signal, QTimer, SIGNAL, QMargins
 from PySide2.QtGui import QTextCursor
 
-from plugins import flask, npm
-import qt_fa
+from localhero.plugins import flask, node
+import localhero.qt_fa as qt_fa
+from localhero import fonts, style
 
 server_env = ServerRunnerEnvironment()
 
@@ -87,35 +88,40 @@ class ServerControlWidget(QWidget):
         self.setStyle(self.style())
         self.label.setStyle(self.label.style())
 
+    def flush_proc_output(self):
+
+        # update process outputs
+        # maintain scroll position and selection
+        scroll_y = self.textOutput.verticalScrollBar().value()
+        scroll_x = self.textOutput.horizontalScrollBar().value()
+        sel_start = self.textOutput.textCursor().selectionStart()
+        sel_end = self.textOutput.textCursor().selectionEnd()
+
+        new_lines = self.runner_inst.output[self.last_pulled_output_index:]
+        self.last_pulled_output_index += len(new_lines)
+        new_output = ''.join(new_lines)
+        self.textOutput.setPlainText(
+            self.textOutput.toPlainText() + new_output)
+
+        cur = self.textOutput.textCursor()
+        cur.setPosition(sel_start)
+        cur.setPosition(sel_end, QTextCursor.KeepAnchor)
+        self.textOutput.setTextCursor(cur)
+
+        self.textOutput.verticalScrollBar().setValue(scroll_y)
+        self.textOutput.horizontalScrollBar().setValue(scroll_x)
+
+
     @Slot()
     def check_proc_state(self):
+        self.flush_proc_output()
+            
         if self.runner_inst.is_alive():
             self.btn_start.setEnabled(False)
             self.btn_stop.setEnabled(True)
             self.status_indic.setProperty('class', 'indicator_on')
             self.status_indic.setStyle(self.status_indic.style())
-
-            # update process outputs
-            # maintain scroll position and selection
-            scroll_y = self.textOutput.verticalScrollBar().value()
-            scroll_x = self.textOutput.horizontalScrollBar().value()
-            sel_start = self.textOutput.textCursor().selectionStart()
-            sel_end = self.textOutput.textCursor().selectionEnd()
-
-            new_lines = self.runner_inst.output[self.last_pulled_output_index:]
-            self.last_pulled_output_index += len(new_lines)
-            new_output = ''.join(new_lines)
-            self.textOutput.setPlainText(
-                self.textOutput.toPlainText() + new_output)
-
-            cur = self.textOutput.textCursor()
-            cur.setPosition(sel_start)
-            cur.setPosition(sel_end, QTextCursor.KeepAnchor)
-            self.textOutput.setTextCursor(cur)
-
-            self.textOutput.verticalScrollBar().setValue(scroll_y)
-            self.textOutput.horizontalScrollBar().setValue(scroll_x)
-
+            
         else:
             self.btn_start.setEnabled(True)
             self.btn_stop.setEnabled(False)
@@ -188,12 +194,13 @@ class MainWindow(QWidget):
 
         # load settings
         self.conf = Config()
-        self.conf.load_yaml(Config.get_config_file())
-
-        self.plugins = [flask.FlaskPlugin, npm.NPMPlugin]
-
+        self.conf.load_yaml(self.conf.get_config_file())
+        
         for name, server_conf in self.conf.get_servers().items():
             self.add_server_tab(name, server_conf)
+
+        # select first tab 
+        self.server_tab_clicked(0, self.server_tabs[0])
 
         self.tab_layout.addSpacerItem(QSpacerItem(
             20, 20, QSizePolicy.Minimum, QSizePolicy.Expanding))
@@ -207,16 +214,17 @@ class MainWindow(QWidget):
         for tab in self.server_tabs:
             tab.stop_server()
 
-
-if __name__ == "__main__":
+def main():
     # setup logging
     logging.basicConfig(level=logging.DEBUG)
 
     app = QApplication(sys.argv)
-    app.setApplicationName('StackMan')
+    app.setApplicationName('Localhero')
     app.setApplicationVersion('0.1.0')
 
-    with open('./style/app.css', 'r') as f:
+    styles = os.path.realpath(os.path.join(os.path.dirname(style.__file__), 'app.css'))
+
+    with open(styles, 'r') as f:
         app.setStyleSheet(f.read())
 
     qt_fa.load_solid()
@@ -227,3 +235,7 @@ if __name__ == "__main__":
     widget.show()
 
     sys.exit(app.exec_())
+
+
+if __name__ == "__main__":
+    main()

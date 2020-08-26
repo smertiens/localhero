@@ -1,14 +1,15 @@
-import yaml
-import os
-import time
-import logging
-import subprocess
-import threading
-import psutil
-import signal
-from plugins import flask, npm
-from plugins._base import BasePlugin
+import os, time, logging, subprocess, threading, signal
+from shutil import copyfile
 
+import yaml
+import psutil
+
+from localhero.plugins import flask, node
+from localhero.plugins._base import BasePlugin
+from localhero import config
+
+class MissingConfig(Exception):
+    pass
 
 def process_variables(s: str, vars: dict) -> str:
     # TODO: proper regex?
@@ -39,15 +40,22 @@ class Config:
     def __init__(self):
         self.servers = {}
 
-    @staticmethod
-    def get_config_file():
-        f = os.path.realpath(os.path.join(
-            os.path.dirname(__file__), 'config.yaml'))
+    def get_config_file(self):
+        f = os.path.join(os.path.expanduser('~'), '.localhero', 'config.yaml')
 
-        if os.path.exists(f):
-            return f
-        else:
-            raise IOError('Config file "%s" not found' % f)
+        if not os.path.exists(f):
+            self.create_default_config(f)
+        
+        return f
+
+    def create_default_config(self, f):
+        # create new config file in user home dir
+        template_conf = os.path.realpath(os.path.join(os.path.dirname(config.__file__), 'config.yaml.example'))
+
+        if not os.path.exists(os.path.dirname(f)):
+            os.makedirs(os.path.dirname(f))
+
+        copyfile(template_conf, f)
 
     def load_yaml(self, filename: str):
 
@@ -71,7 +79,7 @@ class ServerRunnerEnvironment:
     plugins = []
 
     def __init__(self):
-        self.plugins = [flask.FlaskPlugin, npm.NPMPlugin]
+        self.plugins = [flask.FlaskPlugin, node.VueCLIPlugin]
 
 
 class ServerRunner(threading.Thread):
@@ -109,11 +117,10 @@ class ServerRunner(threading.Thread):
         # find plugin to handle the config
         for plugin in self.env.plugins:
             if self.conf.get('type', '') in plugin.handles:
-                self.logger.info('Using "%s" for type "%s"' %
-                                 (plugin, self.conf.get('type')))
+                self.logger.info('Using "%s" for type "%s"' % (plugin, self.conf.get('type')))
                 plugin_inst = plugin(self.conf)
                 cmd = plugin_inst.get_command()
-                self.shutdown_strategy = BasePlugin.SHUTDOWN_STRATEGY_INT
+                self.shutdown_strategy = plugin_inst.get_shutdown_strategy()
 
                 # stop looking for plugin
                 found_plugin = True
@@ -123,7 +130,7 @@ class ServerRunner(threading.Thread):
             raise Exception(
                 'Could not find a plugin to handle type "%s"' % self.conf.get('type'))
 
-        cwd = os.path.realpath(self.conf.get('dir', '.'))
+        cwd = self.conf.get('dir', os.getcwd())
 
         if self.conf.get('venv', None) is not None:
             venv_dir = process_variables(self.conf.get('venv'), {'dir': cwd})
@@ -150,6 +157,10 @@ class ServerRunner(threading.Thread):
 
         self.logger.info('Server process ended with "%s".' % res)
 
+        # Collect remaining output
+        for line in proc.stdout.readline():
+            self.output.append(line)
+
 
 # we need a separate function to shutdown the process, since the thread will block on stdout.readline()
 def stop_runner(runner: ServerRunner):
@@ -167,15 +178,13 @@ def stop_runner(runner: ServerRunner):
             if runner.shutdown_strategy == BasePlugin.SHUTDOWN_STRATEGY_INT:
                 child.send_signal(signal.SIGINT)
             else:
-                runner.logger.error(
-                    'Unknown shutdown strategy. Killing processes.')
+                runner.logger.error('Unknown shutdown strategy. Killing processes.')
 
         gone, alive = psutil.wait_procs(children, timeout=3)
 
         for still_alive in alive:
-            runner.logger.warning(
-                'Process %s is still alive, sending KILL signal...' % still_alive)
-            sill_alive.kill()
+            runner.logger.warning('Process %s is still alive, sending KILL signal...' % still_alive)
+            still_alive.kill()
 
     except psutil.NoSuchProcess:
         runner.logger.error('Could not determine server runner process.')
