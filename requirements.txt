@@ -1,3 +1,3 @@
-pyside2
+PySide2
 psutil
-pyaml
+PyYAML
